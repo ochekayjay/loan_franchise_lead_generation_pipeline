@@ -1,0 +1,316 @@
+id: instagram-email-ext
+namespace: attempt-lead-gen
+
+inputs:
+  - id: inputString
+    type: JSON
+
+tasks:
+  - id: calltoutatis
+    type: io.kestra.plugin.scripts.shell.Commands
+    commands:
+      - toutatis -u {{inputs.inputString.username}} -s 76253748916%3AhOrtO7eUS0h78v%3A23%3AAYcpifZUiaeTZjuaJTgn7OGhnf80hY55H9Hakjjzew > output.json
+    containerImage: localhost:5000/toutatis-modified-one
+    outputFiles:
+      - output.json
+    namespaceFiles:
+      enabled: true
+  - id: loadObject
+    type: io.kestra.plugin.scripts.python.Script
+    script: "import json\r
+
+      \r
+
+      with open(\"objectHold.json\", \"w\") as f:\r
+
+      \    json.dump([], f, indent=4)\r
+
+      \    \r
+
+      with open (\"{{outputs.calltoutatis[\"outputFiles\"]['output.json']}}\") as f:\r
+
+      \    newdata = json.load(f)\r
+
+      \    \r
+
+      newdata['username'] = '{{inputs.inputString.username}}'\r
+
+      # Load existing data\r
+
+      with open(\"objectHold.json\", \"r\") as f:\r
+
+      \    olddata = json.load(f)\r
+
+      \r
+
+      # Append new item\r
+
+      olddata.append(newdata)\r
+
+      \r
+
+      # Save back to file\r
+
+      with open(\"objectHold.json\", \"w\") as f:\r
+
+      \    json.dump(olddata, f, indent=4)\r\n"
+    outputFiles:
+      - objectHold.json
+  - id: storetoPostgress
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: localhost:5000/ytdatapersistor
+    script: "import math,json, psycopg2\r
+
+      from kestra import Kestra\r
+
+      \r
+
+      \r
+
+      with open(\"{{outputs.loadObject.outputFiles['objectHold.json']}}\", \"r\") as f:\r
+
+      \    olddata = json.load(f)\r
+
+      reformedData = olddata[0]\r
+
+      \r
+
+      conn = psycopg2.connect(\r
+
+      \    host='host.docker.internal',\r
+
+      \    port=5432,\r
+
+      \    database = 'loanMarketingDb',\r
+
+      \    password='k3str4',\r
+
+      \    user='kestra'\r
+
+      \    )\r
+
+      \r
+
+      cur = conn.cursor()\r
+
+      \r
+
+      \r
+
+      \r
+
+      phone_number = reformedData.get(\"phone_number\") or None\r
+
+      public_email = reformedData.get(\"public_email\") or None\r
+
+      \r
+
+      \r
+
+      # compute score here in Python\r
+
+      followers = int(reformedData.get(\"follower_count\", 0) or 0)\r
+
+      media = int(reformedData.get(\"media_count\", 0) or 0)\r
+
+      is_business = 1 if reformedData.get(\"is_business\", \"\").lower() in (\"true\",\"1\",\"yes\",\"y\") else 0\r
+
+      has_email = 1 if reformedData.get(\"public_email\") else 0\r
+
+      \r
+
+      score = min(100, \r
+
+      \    (0.6 * (math.log1p(followers)/10)) +\r
+
+      \    (0.3 * (math.log1p(media)/5)) +\r
+
+      \    (10.0 * has_email) +\r
+
+      \    (12.0 * is_business)\r
+
+      )\r
+
+      reformedData['score'] = score\r
+
+      reformedData['phone_number'] = phone_number\r
+
+      reformedData['public_email'] = public_email\r
+
+      reformedData['sme_sector'] = 'Shoes'\r
+
+      reformedData['biography'] = reformedData['Biography']\r
+
+      sme_val = 'Shoes'\r
+
+      \r
+
+      cur.execute(\"\"\"\r
+
+      \    CREATE TABLE IF NOT EXISTS generalMarketTable (\r
+
+      \        id SERIAL PRIMARY KEY,\r
+
+      \        username TEXT,\r
+
+      \        userID TEXT,\r
+
+      \        full_name TEXT,\r
+
+      \        is_verified TEXT,\r
+
+      \        is_business TEXT,\r
+
+      \        is_private TEXT,\r
+
+      \        follower_count TEXT,\r
+
+      \        following_count TEXT,\r
+
+      \        Biography TEXT,\r
+
+      \        media_count TEXT,\r
+
+      \        external_url TEXT,\r
+
+      \        is_whatsapp_linked TEXT,\r
+
+      \        is_memorialized TEXT,\r
+
+      \        is_new_to_instagram TEXT,\r
+
+      \        public_email TEXT,\r
+
+      \        phone_number TEXT,\r
+
+      \        sme_sector TEXT,\r
+
+      \        score_rating NUMERIC(5,2)\r
+
+      \r
+
+      \    )\r
+
+      \"\"\")\r
+
+      \r
+
+      \r
+
+      \r
+
+      cur.execute(\"\"\"\r
+
+      \    INSERT INTO generalMarketTable (\r
+
+      \    username,\r
+
+      \    userID,\r
+
+      \    full_name,\r
+
+      \    is_verified,\r
+
+      \    is_business,\r
+
+      \    is_private,\r
+
+      \    follower_count,\r
+
+      \    following_count,\r
+
+      \    Biography,\r
+
+      \    media_count,\r
+
+      \    external_url,\r
+
+      \    is_whatsapp_linked,\r
+
+      \    is_memorialized,\r
+
+      \    is_new_to_instagram,\r
+
+      \    public_email,\r
+
+      \    phone_number,\r
+
+      \    sme_sector,\r
+
+      \    score_rating\r
+
+      \    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)\r
+
+      \"\"\",\r
+
+      \    (reformedData['username'],reformedData['userID'],\r
+
+      \     reformedData['full_name'],reformedData['is_verified'],\r
+
+      \     reformedData['is_business'],reformedData['is_private'],\r
+
+      \     reformedData['follower_count'],reformedData['following_count'],\r
+
+      \     reformedData['Biography'],reformedData['media_count'],\r
+
+      \     reformedData['external_url'],reformedData['is_whatsapp_linked'],\r
+
+      \     reformedData['is_memorialized'],reformedData['is_new_to_instagram'],\r
+
+      \     public_email,phone_number,sme_val,score))\r
+
+      conn.commit()\r
+
+      \r
+
+      cur.close()\r
+
+      conn.close()\r
+
+      \r
+
+      Kestra.outputs({'reformedData':reformedData})"
+  - id: webhook-post-request
+    type: io.kestra.plugin.scripts.python.Script
+    script: "import requests\r
+
+      import json\r
+
+      \r
+
+      # Your webhook URL\r
+
+      webhook_url = \"https://script.google.com/macros/s/AKfycbzZ-lyVpNuOI6IILtBQaW_zn7a8p8PIUaVKFOM5YL1S5YiuSyE1HNwgdAeFgegfyiIk/exec\"\r
+
+      \r
+
+      # Data you want to send (dictionary)\r
+
+      payload = {{outputs.storetoPostgress.vars['reformedData']}}\r
+
+      \r
+
+      # Send the POST request\r
+
+      response = requests.post(\r
+
+      \    webhook_url,\r
+
+      \    data=json.dumps(payload),\r
+
+      \    headers={\"Content-Type\": \"application/json\"}\r
+
+      )\r
+
+      \r
+
+      # Check response\r
+
+      if response.status_code == 200:\r
+
+      \    print(\"✅ Webhook sent successfully!\")\r
+
+      else:\r
+
+      \    print(f\"❌ Failed with status code {response.status_code}: {response.text}\")\r\n"
+    containerImage: localhost:5000/ytdatapersistor
